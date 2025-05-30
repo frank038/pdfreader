@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-# V. 1.0
+# V. 2.0
 
 # use headbar
 USE_HEADBAR = 1
+
+# toolbar icon size
+TICON_SIZE = 36
 
 import gi
 gi.require_version('EvinceDocument', '3.0')
@@ -14,15 +17,17 @@ from gi.repository import EvinceView
 import os,sys, datetime, subprocess
 
 if (len(sys.argv) != 2):
-    print ("Usage: "+sys.argv[0]+" file")
-    sys.exit(0)
+    docfile=""
 else:
     docfile=os.path.abspath(sys.argv[1])
 
-# get the mimetype of the input file
 file = Gio.File.new_for_path(sys.argv[1])
-file_info = file.query_info('standard::*', Gio.FileQueryInfoFlags.NONE, None)
-ftype = Gio.FileInfo.get_content_type(file_info)
+ftype = None
+try:
+    file_info = file.query_info('standard::*', Gio.FileQueryInfoFlags.NONE, None)
+    ftype = Gio.FileInfo.get_content_type(file_info)
+except:
+    ftype = None
 
 #
 settings = None
@@ -37,22 +42,54 @@ with open(conf_file, "r") as fconf:
 
 #==========================================================
 
+
+class passwordWin(Gtk.Dialog):
+    def __init__(self, _parent):
+        super().__init__(title="Password", transient_for=None, flags=0)
+        self._parent = _parent
+        self.main_box = self.get_content_area()
+        #
+        lbl = Gtk.Label(label="insert the password")
+        self.main_box.add(lbl)
+        #
+        self.entry = Gtk.Entry.new()
+        self.entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        self.entry.set_visibility(False)
+        self.entry.set_invisible_char("*")
+        self.main_box.add(self.entry)
+        #
+        btn = Gtk.Button(label="Accept")
+        btn.connect('clicked', self.btn_clicked)
+        self.main_box.add(btn)
+        #
+        self._value = 0
+        #
+        self.show_all()
+    
+    def btn_clicked(self, btn):
+        _text = self.entry.get_text()
+        if _text:
+            self._value = _text
+        self.close()
+
+
 class EvinceViewer:
 
     def __init__(self):
 
         # create main window
         self.window = Gtk.Window()
-        # set title, size, position
+        #
         self.window.set_title("Pdf Reader - "+os.path.basename(docfile))
         self.window.set_default_size(WWIDTH, WHEIGHT)
-        pixbuf = Gtk.IconTheme.get_default().load_icon("accessories-text-editor", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("applications-office", TICON_SIZE, 0)
         self.window.set_icon(pixbuf)
-        # connect destroy and delete events to quit
+        #
         self.window.connect('destroy', Gtk.main_quit)
         self.window.connect('delete-event', Gtk.main_quit)
         self.window.connect("key-press-event", self.keypress)
         self.window.connect('scroll-event', self.fscroll_event)
+        self.window.connect('show', self.show_event)
         # headbar
         if USE_HEADBAR:
             header = Gtk.HeaderBar(title="Pdf Reader - "+os.path.basename(docfile))
@@ -70,32 +107,30 @@ class EvinceViewer:
         self.main_box.add(button_box)
         
         # show history button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("address-book-new", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("address-book-new", TICON_SIZE, 0)
         hist_image = Gtk.Image.new_from_pixbuf(pixbuf)
         hist_button = Gtk.Button(image=hist_image)
-        hist_button.set_tooltip_text("Show the history")
+        hist_button.set_tooltip_text("Bookmarks")
         button_box.add(hist_button)
         hist_button.connect("clicked", self.on_hist_button)
         hist_button.set_sensitive(False)
-        if ftype == "application/pdf":
-            hist_button.set_sensitive(True)
         
         # separator
         separator = Gtk.Separator()
         button_box.add(separator)
-        # open file button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("document-open", 24, 0)
-        openf_image = Gtk.Image.new_from_pixbuf(pixbuf)
-        button_openf = Gtk.Button(image=openf_image)
-        button_openf.set_tooltip_text("Open a new file")
-        button_box.add(button_openf)
-        button_openf.connect("clicked", self.on_open_file)
+        # # open file button
+        # pixbuf = Gtk.IconTheme.get_default().load_icon("document-open", TICON_SIZE, 0)
+        # openf_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        # button_openf = Gtk.Button(image=openf_image)
+        # button_openf.set_tooltip_text("Open a new file")
+        # button_box.add(button_openf)
+        # button_openf.connect("clicked", self.on_open_file)
         
         # separator
         separator = Gtk.Separator()
         button_box.add(separator)
         # print button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("document-print", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("document-print", TICON_SIZE, 0)
         print_image = Gtk.Image.new_from_pixbuf(pixbuf)
         button_print = Gtk.Button(image=print_image)
         button_print.set_tooltip_text("Print")
@@ -105,7 +140,7 @@ class EvinceViewer:
         separator = Gtk.Separator()
         button_box.add(separator)
         # dual/single page button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("gtk-copy", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("gtk-copy", TICON_SIZE, 0)
         dpage_image = Gtk.Image.new_from_pixbuf(pixbuf)
         button_dpage = Gtk.Button(image=dpage_image)
         self.dpage_state = False
@@ -125,14 +160,14 @@ class EvinceViewer:
         self.total_label = Gtk.Label()
         button_box.add(self.total_label)
         # previous page button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("go-previous", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("go-previous", TICON_SIZE, 0)
         p_image = Gtk.Image.new_from_pixbuf(pixbuf)
         p_button = Gtk.Button(image=p_image)
         p_button.set_tooltip_text("Previous page")
         p_button.connect("clicked", self.prev_button)
         button_box.add(p_button)
         # next page button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("go-next", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("go-next", TICON_SIZE, 0)
         n_image = Gtk.Image.new_from_pixbuf(pixbuf)
         n_button = Gtk.Button(image=n_image)
         n_button.set_tooltip_text("Next page")
@@ -142,7 +177,7 @@ class EvinceViewer:
         separator = Gtk.Separator()
         button_box.add(separator)
         # zoom +
-        pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-in", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-in", TICON_SIZE, 0)
         zoomp_image = Gtk.Image.new_from_pixbuf(pixbuf)
         self.bt_zoomp = Gtk.Button(image=zoomp_image)
         self.bt_zoomp.set_tooltip_text("Zoom+")
@@ -153,7 +188,7 @@ class EvinceViewer:
         
         button_box.add(self.zoom_label)
         # zoom -
-        pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-out", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-out", TICON_SIZE, 0)
         zoomm_image = Gtk.Image.new_from_pixbuf(pixbuf)
         self.bt_zoomm = Gtk.Button(image=zoomm_image)
         self.bt_zoomm.set_tooltip_text("Zoom-")
@@ -164,14 +199,14 @@ class EvinceViewer:
         separator = Gtk.Separator()
         button_box.add(separator)
         # rotate left button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("object-rotate-left", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("object-rotate-left", TICON_SIZE, 0)
         rl_image = Gtk.Image.new_from_pixbuf(pixbuf)
         rl_button = Gtk.Button(image=rl_image)
         rl_button.set_tooltip_text("Rotate left")
         button_box.add(rl_button)
         rl_button.connect("clicked", self.on_rotate_left)
         # rotate right button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("object-rotate-right", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("object-rotate-right", TICON_SIZE, 0)
         rr_image = Gtk.Image.new_from_pixbuf(pixbuf)
         rr_button = Gtk.Button(image=rr_image)
         rr_button.set_tooltip_text("Rotate right")
@@ -182,7 +217,7 @@ class EvinceViewer:
         separator = Gtk.Separator()
         button_box.add(separator)
         # search button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("edit-find", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("edit-find", TICON_SIZE, 0)
         search_image = Gtk.Image.new_from_pixbuf(pixbuf)
         search_button = Gtk.Button(image=search_image)
         search_button.set_tooltip_text("Find")
@@ -203,28 +238,26 @@ class EvinceViewer:
         sb_button.connect("clicked", self.on_enter, sb_pover)
         #
         # next result button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("go-next", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("go-next", TICON_SIZE, 0)
         fnext_image = Gtk.Image.new_from_pixbuf(pixbuf)
         fnext_button = Gtk.Button(image=fnext_image)
         fnext_button.set_tooltip_text("Next result")
         button_box.add(fnext_button)
         fnext_button.connect("clicked", self.ffnext_button)
         # previous result button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("go-previous", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("go-previous", TICON_SIZE, 0)
         fprev_image = Gtk.Image.new_from_pixbuf(pixbuf)
         fprev_button = Gtk.Button(image=fprev_image)
         fprev_button.set_tooltip_text("Previous result")
         button_box.add(fprev_button)
         fprev_button.connect("clicked", self.ffprev_button)
-        
         # copy to clipboard
-        # variable
         self.copy_text_to_clipboard = ""
         # separator
         separator = Gtk.Separator()
         button_box.add(separator)
         # copy to clipboard button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("edit-paste", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("edit-paste", TICON_SIZE, 0)
         clip_image = Gtk.Image.new_from_pixbuf(pixbuf)
         clip_button = Gtk.Button(image=clip_image)
         clip_button.set_tooltip_text("Copy to clipboard")
@@ -235,46 +268,88 @@ class EvinceViewer:
         separator = Gtk.Separator()
         button_box.add(separator)
         # info button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("gnome-help", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("gnome-help", TICON_SIZE, 0)
         info_image = Gtk.Image.new_from_pixbuf(pixbuf)
         info_button = Gtk.Button(image=info_image)
         info_button.set_tooltip_text("Document info")
         button_box.add(info_button)
-        # DISATTIVATO
-        ## separator
-        #separator = Gtk.Separator()
-        #button_box.add(separator)
-        ## save document button
-        #pixbuf = Gtk.IconTheme.get_default().load_icon("gtk-save", 24, 0)
-        #save_image = Gtk.Image.new_from_pixbuf(pixbuf)
-        #save_button = Gtk.Button(image=save_image)
-        #save_button.set_tooltip_text("Save this document")
-        #button_box.add(save_button)
-        #save_button.connect("clicked", self.fsave_button)
+        # annotations
+        pixbuf = Gtk.IconTheme.get_default().load_icon("annotations-text-symbolic", TICON_SIZE, 0)
+        annot_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        # annot_button = Gtk.Button(image=annot_image)
+        annot_button = Gtk.MenuButton(image=annot_image)
         
+        menu = Gtk.Menu()
+        annot_button.set_popup(menu)
+        menuitem1 = Gtk.MenuItem("Highlight")
+        menuitem1.connect("activate", self.on_menuitem_activated, "h")
+        menu.append(menuitem1)
+        menuitem2 = Gtk.MenuItem("Icon")
+        menuitem2.connect("activate", self.on_menuitem_activated, "i")
+        menu.append(menuitem2)
+        menu.show_all()
+        
+        annot_button.set_tooltip_text("Annotations")
+        annot_button.hide()
+        button_box.add(annot_button)
+        #
+        # night mode
+        pixbuf = Gtk.IconTheme.get_default().load_icon("format-justify-fill", TICON_SIZE, 0)
+        night_mode_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        night_mode_button= Gtk.Button(image=night_mode_image)
+        night_mode_button.set_tooltip_text("Night mode")
+        night_mode_button.connect("clicked", self.night_mode)
+        button_box.add(night_mode_button)
+        night_mode_button.show()
+        # separator
+        separator = Gtk.Separator()
+        button_box.add(separator)
+        #
+        # save document button
+        pixbuf = Gtk.IconTheme.get_default().load_icon("gtk-save", TICON_SIZE, 0)
+        save_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        self.save_button = Gtk.Button(image=save_image)
+        self.save_button.set_tooltip_text("Save this document")
+        button_box.add(self.save_button)
+        self.save_button.connect("clicked", self.fsave_button)
+        self._is_modified = False
+        # self.save_button.set_sensitive(False)
         # separator
         #separator = Gtk.Separator()
         #button_box.add(separator)
+        #
         # quit the program button
-        pixbuf = Gtk.IconTheme.get_default().load_icon("exit", 24, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("exit", TICON_SIZE, 0)
         quit_image = Gtk.Image.new_from_pixbuf(pixbuf)
         quit_button = Gtk.Button(image=quit_image)
         quit_button.set_tooltip_text("Quit")
         button_box.pack_end(quit_button, False, False, 0)
-        quit_button.connect("clicked", Gtk.main_quit)
-        
+        quit_button.connect("clicked", self.on_quit)
+        #
         # scrolled window for the viewer
         scroll = Gtk.ScrolledWindow()
         self.main_box.pack_start(scroll, True, True, 0)
+        if (len(sys.argv) != 2):
+            self.info_dialog("Usage:\npdfreader.py FILE")
+            sys.exit()
+        if ftype == None:
+            self.info_dialog(os.path.basename(sys.argv[1])+":\nError while opening the file\nor type not supported.")
+            sys.exit()
         # EVINCE DOCUMENT
         EvinceDocument.init()
+        self._has_password = 0
         # load the document or exit
         try:
             self.doc = EvinceDocument.Document.factory_get_document('file://'+docfile)
-        except:
-            print(os.path.basename(sys.argv[1])+" :\nError while opening the file\nor type not supported.")
-            self.info_dialog(os.path.basename(sys.argv[1])+":\nError while opening the file\nor type not supported.")
-            sys.exit()
+        except Exception as E:
+            # is encripted
+            if E.code == 2:
+                self._has_password = 1
+                self.info_dialog(os.path.basename(sys.argv[1])+":\nThe file is password protected.")
+                sys.exit()
+            else:
+                self.info_dialog(os.path.basename(sys.argv[1])+":\nError while opening the file.")
+                sys.exit()
         #
         self.total_label.set_label(str(self.doc.get_n_pages()))
         # TOC of doc by links
@@ -290,6 +365,7 @@ class EvinceViewer:
             pass
         # evince view
         self.view = EvinceView.View()
+        #
         self.view.can_zoom_in()
         self.view.can_zoom_out()
         # evince model
@@ -315,17 +391,16 @@ class EvinceViewer:
         self.window.connect("check-resize", self.on_win_resize)
         self.view.connect("selection-changed", self.view_sel_changed)
         self.model.connect("page-changed", self.model_page_changed)
-        #button_print.connect("clicked", self.button_clicked)
         self.curr_entry.connect("activate", self.curr_entry_activate)
         #
-        gi = self.doc.get_info()
+        gdi = self.doc.get_info()
         info_list = []
-        info_list.append(gi.author or "")
-        info_list.append(gi.modified_date or "")
-        info_list.append(gi.creator or "")
-        info_list.append(gi.format or "")
-        info_list.append(gi.n_pages or "")
-        info_list.append(gi.producer or "")
+        info_list.append(gdi.author or "")
+        info_list.append(gdi.modified_date or "")
+        info_list.append(gdi.creator or "")
+        info_list.append(gdi.format or "")
+        info_list.append(gdi.n_pages or "")
+        info_list.append(gdi.producer or "")
         info_button.connect("clicked", self.finfo_button, info_list)
         # window size constants
         self.win_width = self.window.get_size().width
@@ -349,15 +424,69 @@ class EvinceViewer:
         self.sw.add(self.tree)
         self.hbox.pack_start(self.sw, False, False, 1)
         self.tree.set_expander_column(column1)
-
+        #
+        self.list_annotations = []
+        #
+        if ftype == "application/pdf":
+            hist_button.set_sensitive(True)
+            # if self.doc.can_add_annotation():
+                # annot_button.show()
+            # self._doc_can_remove_annotations = self.doc.can_remove_annotation()
+        else:
+            annot_button.hide()
+            
+    def show_event(self, event):
+        pass
+        
+    def on_quit(self, btn):
+        if self._is_modified and self.model.get_document().get_modified():
+            self.info_dialog("This document has been modified.\nSave it or quit this program again.")
+            self._is_modified = False
+            return
+        Gtk.main_quit()
+    
+    def on_menuitem_activated(self, menuitem, _type):
+        if _type == "h":
+            if self.view.get_has_selection():
+                ret = self.view.add_text_markup_annotation_for_selected_text()
+                # _annotation = EvinceDocument.AnnotationType.TEXT_MARKUP
+                # ret = self.view.begin_add_annotation(_annotation)
+                if ret == False:
+                    self.info_dialog("Error while adding the annotation.")
+                else:
+                    self._is_modified = True
+                    # self.save_button.set_sensitive(True)
+                    # self.list_annotations.append(_annotation)
+        elif _type == "i":
+            _annotation = EvinceDocument.AnnotationType.TEXT
+            ret = self.view.begin_add_annotation(_annotation)
+            if ret == False:
+                self.info_dialog("Error while adding the annotation.")
+            else:
+                self._is_modified = True
+                # self.save_button.set_sensitive(True)
+                # self.list_annotations.append(_annotation)
+    
+    def on_add_annotation(self, btn):
+        if self.view.get_has_selection():
+            # EvinceDocument.AnnotationType.TEXT TEXT_MARKUP ATTACHMENT
+            _annotation = EvinceDocument.AnnotationType.TEXT
+            ret = self.view.begin_add_annotation(_annotation)
+            if ret == False:
+                self.info_dialog("Error while adding the annotation.")
+            else:
+                self._is_modified = True
+                # self.save_button.set_sensitive(True)
+                self.list_annotations.append(_annotation)
+    
     # open file function
     def on_open_file(self, button):
         filename = self.fopen_dialog()
         if filename:
             try:
-                subprocess.Popen([sys.argv[0], filename], universal_newlines=True)
-            except:
-                pass
+                subprocess.Popen([os.path.abspath(sys.argv[0]), filename], universal_newlines=True)
+            except Exception as E:
+                self.info_dialog(str(E))
 
     # file open dialog
     def fopen_dialog(self):
@@ -593,7 +722,6 @@ class EvinceViewer:
         zoom = self.model.get_scale()
         self.zoom_label.set_text(format(zoom, '.2f'))
 
-
     #
     def fbt_zoomm(self, button):
         self.model.props.sizing_mode = EvinceView.SizingMode.FREE
@@ -603,16 +731,19 @@ class EvinceViewer:
     
     # get the info of the document
     def finfo_button(self, button, info_list):
-        
         if ftype == "application/pdf":
-            ddate = datetime.datetime.fromtimestamp(int(info_list[1])).strftime(' %m-%d-%Y %H:%M:%S ')
+            ddate = ""
+            try:
+                ddate = datetime.datetime.fromtimestamp(int(info_list[1])).strftime(' %m-%d-%Y %H:%M:%S ')
+            except:
+                ddate = ""
             self.info_dialog("Author: "+info_list[0]+"\n"+"Date: "+str(ddate)+"\n"+"Creator: "+str(info_list[2])+"\n"+"Type: "+info_list[3]+"\n"+"Pages: "+str(info_list[4])+"\n"+"Program: "+info_list[5])
     
     # document info dialog
     def info_dialog(self, stext):
         
         dialog = Gtk.MessageDialog(self.window, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                          Gtk.MessageType.QUESTION, Gtk.ButtonsType.OK, stext)
+                          Gtk.MessageType.INFO, Gtk.ButtonsType.OK, stext)
     
         response = dialog.run()
 
@@ -622,6 +753,9 @@ class EvinceViewer:
             dialog.destroy()
         else:
             dialog.destroy()
+        
+    def night_mode(self, btn):
+        self.model.set_inverted_colors(not self.model.get_inverted_colors())
         
     # go to the page n
     def curr_entry_activate(self, entry):
@@ -643,23 +777,27 @@ class EvinceViewer:
     # handling keyboard events
     def keypress(self,widget,event):
         keyname = Gdk.keyval_name(event.keyval)
-        # reload the document
-        if keyname=='r':
-            self.model.get_document().load('file://'+docfile) # <- ADD THIS LINE
-            self.view.reload()
-        elif keyname == 'Return':
+        # # reload the document
+        # if keyname=='r':
+            # self.model.get_document().load('file://'+docfile) # <- ADD THIS LINE
+            # self.view.reload()
+        # el
+        if keyname == 'Return':
             if self.fullscreen == False:
                 self.fullscreen=True
                 self.window.fullscreen()
             else:
                 self.fullscreen=False
                 self.window.unfullscreen()
-        # quit the program
-        elif keyname=='q':
-            Gtk.main_quit()
-        # select all the text
-        elif keyname=='a':
-            self.view.select_all()
+        # # quit the program
+        # elif keyname=='q':
+            # Gtk.main_quit()
+        # # select all the text
+        # elif keyname=='a':
+            # self.view.select_all()
+        # escape
+        elif keyname == 'escape':
+            self.view.cancel_add_annotation()
 
 ### CLIPBOARD ###
 
