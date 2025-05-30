@@ -18,6 +18,7 @@ Features:
 - pdf document info
 - night mode
 - annotations (can only be added, then the document must be saved)
+- save the window size
 
 
 ![My image](https://github.com/frank038/pdfreader/blob/master/image.png)
