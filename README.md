@@ -1,5 +1,4 @@
 # pdfreader
-V. 1.0
 
 This program is free to use and modify.
 
@@ -9,14 +8,16 @@ Required: python, gtk3, evince python bindibgs.
 
 This program opens all the file types and has all the feature supported by the evince libs bindings (e.g.: forms).
 Features:
-- table of content
+- table of content (if supported by the file type)
 - printing (if supported by the file type)
 - dual/single page
 - zoom
-- searching
+- searching (if supported by the file type)
 - page rotation
-- clipboard
+- clipboard (if supported by the file type)
 - pdf document info
+- night mode
+- annotations (can only be added, then the document must be saved)
 
 
 ![My image](https://github.com/frank038/pdfreader/blob/master/image.png)
