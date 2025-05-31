@@ -19,6 +19,8 @@ Features:
 - night mode
 - annotations (can only be added, then the document must be saved)
 - save the window size
+- load documents
+- single instance mode
 
 
 ![My image](https://github.com/frank038/pdfreader/blob/master/image.png)
