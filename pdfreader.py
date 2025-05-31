@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V. 2.0
+# V. 3.0
 
 # use headbar
 USE_HEADBAR = 1
@@ -7,27 +7,17 @@ USE_HEADBAR = 1
 # toolbar icon size
 TICON_SIZE = 36
 
+#
+SET_SINGLE_INSTANCE = 1
+
 import gi
 gi.require_version('EvinceDocument', '3.0')
 gi.require_version('Gtk', '3.0')
 gi.require_version('EvinceView', '3.0')
-from gi.repository import Gtk, Gdk, GLib, Gio
+from gi.repository import Gtk, Gdk, GLib, Gio, GObject
 from gi.repository import EvinceDocument
 from gi.repository import EvinceView
 import os,sys, datetime, subprocess
-
-if (len(sys.argv) != 2):
-    docfile=""
-else:
-    docfile=os.path.abspath(sys.argv[1])
-
-file = Gio.File.new_for_path(sys.argv[1])
-ftype = None
-try:
-    file_info = file.query_info('standard::*', Gio.FileQueryInfoFlags.NONE, None)
-    ftype = Gio.FileInfo.get_content_type(file_info)
-except:
-    ftype = None
 
 #
 settings = None
@@ -80,51 +70,216 @@ class EvinceViewer:
         # create main window
         self.window = Gtk.Window()
         #
-        self.window.set_title("Pdf Reader - "+os.path.basename(docfile))
+        if SET_SINGLE_INSTANCE:
+            self._app = Gtk.Application.new("my.pdfreader", Gio.ApplicationFlags.HANDLES_OPEN)
+            # True on success
+            ret = self._app.register(None)
+            self._app.mark_busy()
+            # if this application has already been registered
+            _remote = self._app.get_is_remote()
+            if _remote:
+                self._app.open([Gio.File.new_for_path(sys.argv[1])],"")
+                self._app.run(None)
+                sys.exit(0)
+            #
+            # self._app.connect('startup', self.on_app_started)
+            # needed by run
+            self._app.connect('activate', self.on_app_activate)
+            self._app.connect('open', self.on_app_open)
+        #
         self.window.set_default_size(WWIDTH, WHEIGHT)
         pixbuf = Gtk.IconTheme.get_default().load_icon("applications-office", TICON_SIZE, 0)
         self.window.set_icon(pixbuf)
+        # whether a doc has been modified
+        self._doc_modified = False
+        self._list_doc_modified = []
         #
-        self.window.connect('destroy', Gtk.main_quit)
-        self.window.connect('delete-event', Gtk.main_quit)
-        self.window.connect("key-press-event", self.keypress)
-        self.window.connect('scroll-event', self.fscroll_event)
+        self.window.connect('destroy', self.on_quit2)
+        self.window.connect('delete-event', self.on_quit)
+        # self.window.connect("key-press-event", self.keypress)
+        # self.window.connect('scroll-event', self.fscroll_event)
         self.window.connect('show', self.show_event)
+        self.window.connect("check-resize", self.on_win_resize)
+        #
+        # horizontal box - main full page container - has scrollbars
+        self.thebox = Gtk.Box(orientation=1, spacing=0)
+        self.window.add(self.thebox)
+        #
+        self._notebook = Gtk.Notebook()
+        self._notebook.connect('switch-page', self.on_notebook_switch_page)
+        self.thebox.pack_start(self._notebook, True, True, 0)
+        #
         # headbar
         if USE_HEADBAR:
-            header = Gtk.HeaderBar(title="Pdf Reader - "+os.path.basename(docfile))
-            header.props.show_close_button = True
-            self.window.set_titlebar(header)
+            self.header = Gtk.HeaderBar.new()
+            self.title_label = Gtk.Label.new()
+            self.title_label.set_hexpand(True)
+            self.header.set_custom_title(self.title_label)
+            self.title_label.set_text("Pdf Reader")
+            self.header.props.show_close_button = True
+            self.window.set_titlebar(self.header)
+            self.title_label.show()
+            self.header.show_all()
+        else:
+            self.window.set_title("Pdf Reader")
+        #
+        ####
+        if (len(sys.argv) != 2):
+            self.info_dialog("Usage:\npdfreader.py FILE")
+            sys.exit()
+        # window size constants
+        self.win_width = self.window.get_size().width
+        self.win_height = self.window.get_size().height
+        #
+        self.copy_text_to_clipboard = ""
+        #
+        # self.sig = None
+        self.sig = SignalObject()
+        #
+        self.window.show_all()
+        #
+        if len(sys.argv) > 1:
+            self.win_add_page(os.path.realpath(sys.argv[1]))
         
-        # horizontal box
-        self.hbox = Gtk.Box(orientation=0, spacing=0)
-        self.window.add(self.hbox)
-        # 
+    def win_add_page(self, _file):
+        # load the document or exit
+        self.doc = None
+        try:
+            EvinceDocument.init()
+            self.doc = EvinceDocument.Document.factory_get_document('file://'+_file)
+        except Exception as E:
+            # # is encripted
+            # if E.code == 2:
+                # # self._has_password = 1
+                # self.info_dialog(os.path.basename(self._file)+":\nThe file is password protected.")
+                # self.doc = None
+            # else:
+            self.info_dialog(os.path.basename(_file)+":\nError while opening the file.")
+            self.doc = None
+        #
+        if self.doc:
+            pagewin = pageWin(self, _file, self.doc)
+            #
+            page_label = Gtk.Label(label=os.path.basename(_file))
+            page_label.set_tooltip_text(_file)
+            self._notebook.append_page(pagewin, page_label)
+            #
+            self._notebook.show_all()
+            self._notebook.set_current_page(self._notebook.get_n_pages()-1)
+            self._notebook.set_tab_reorderable(pagewin, True)
+    
+    # open a new document from another instance
+    def on_app_open(self, _app, _list_files, _h, _a):
+        if _list_files and len(_list_files) > 0:
+            _file = _list_files[0].get_path()
+            if os.path.exists(_file) and os.access(_file, os.R_OK):
+                self.win_add_page(_file)
+            else:
+                self.info_dialog("The file\n {} \ndoesn't exist or cannot be read.".format(os.path.basename(_file)))
+    
+    # open a new document from dialog
+    def on_app_open_from_dialog(self, _file):
+        if os.path.exists(_file) and os.access(_file, os.R_OK):
+            self.win_add_page(_file)
+        else:
+            self.info_dialog("The file\n {} \ndoesn't exist or cannot be read.".format(os.path.basename(_file)))
+    
+    def on_notebook_switch_page(self, _nb, _p, _n):
+        pass
+    
+    # def on_app_started(self, _app):
+        # _app.add_window(self.window)
+        
+    def on_app_activate(self, _app):
+        pass
+    
+    def show_event(self, event):
+        self._app.unmark_busy()
+        
+    def on_quit2(self, _w):
+        # disable the titlebar close button
+        return True
+        
+    def on_quit(self, _w, _e=None):
+        if self._doc_modified and len(self._list_doc_modified) > 0:
+            self.info_dialog("One or more documents have been modified.\nSave them or quit this program again.")
+            self._doc_modified = False
+            self._list_doc_modified = []
+            return True
+        else:
+            Gtk.main_quit()
+    
+    def on_quit_from_doc(self):
+        Gtk.main_quit()
+    
+    def on_win_resize(self, win):
+        rwin_width = self.window.get_size().width
+        rwin_height = self.window.get_size().height
+        if (rwin_width) != (self.win_width) or (rwin_height) != (self.win_height):
+            self.sig.propList = ["adjust-zoom"]
+            conf_file = os.path.dirname(os.path.abspath(sys.argv[0]))+"/conf.cfg"
+            with open(conf_file, "w") as fconf:
+                fconf.write(str(rwin_width)+"\n"+str(rwin_height))
+    
+    # document info dialog
+    def info_dialog(self, stext):
+        dialog = Gtk.MessageDialog(self.window, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                          Gtk.MessageType.INFO, Gtk.ButtonsType.OK, stext)
+        response = dialog.run()
+        dialog.set_default_size(400, 300)
+        if response == Gtk.ResponseType.OK:
+            dialog.destroy()
+        else:
+            dialog.destroy()
+
+
+class pageWin(Gtk.Box):
+    def __init__(self, parent, _file, _doc):
+        super().__init__()
+        self.window = parent
+        self._file = _file
+        self.doc = _doc
+        #
+        self._signal = self.window.sig
+        self._signal.connect("notify::propList", self.pagesignal)
+        #
+        file = Gio.File.new_for_path(self._file)
+        self.ftype = None
+        try:
+            file_info = file.query_info('standard::*', Gio.FileQueryInfoFlags.NONE, None)
+            self.ftype = Gio.FileInfo.get_content_type(file_info)
+        except:
+            self.ftype = None
+        #
+        # horizontal box - main full page container - has scrollbars
+        self.hbox = self#Gtk.Box(orientation=0, spacing=0)
+        # the document container
         self.main_box = Gtk.Box(orientation=1, spacing=0)
         self.hbox.pack_end(self.main_box, True, True, 0)
-        # box for buttons - orizzontale
+        ########
+        # box for buttons
         button_box = Gtk.Box(orientation=0, spacing=5)
         self.main_box.add(button_box)
         
-        # show history button
+        # the bookmark button
         pixbuf = Gtk.IconTheme.get_default().load_icon("address-book-new", TICON_SIZE, 0)
         hist_image = Gtk.Image.new_from_pixbuf(pixbuf)
-        hist_button = Gtk.Button(image=hist_image)
-        hist_button.set_tooltip_text("Bookmarks")
-        button_box.add(hist_button)
-        hist_button.connect("clicked", self.on_hist_button)
-        hist_button.set_sensitive(False)
+        bookmark_button = Gtk.Button(image=hist_image)
+        bookmark_button.set_tooltip_text("Bookmarks")
+        button_box.add(bookmark_button)
+        bookmark_button.connect("clicked", self.on_bookmark_button)
+        bookmark_button.set_sensitive(False)
         
         # separator
         separator = Gtk.Separator()
         button_box.add(separator)
-        # # open file button
-        # pixbuf = Gtk.IconTheme.get_default().load_icon("document-open", TICON_SIZE, 0)
-        # openf_image = Gtk.Image.new_from_pixbuf(pixbuf)
-        # button_openf = Gtk.Button(image=openf_image)
-        # button_openf.set_tooltip_text("Open a new file")
-        # button_box.add(button_openf)
-        # button_openf.connect("clicked", self.on_open_file)
+        # open file button
+        pixbuf = Gtk.IconTheme.get_default().load_icon("document-open", TICON_SIZE, 0)
+        openf_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        button_openf = Gtk.Button(image=openf_image)
+        button_openf.set_tooltip_text("Open a new file")
+        button_box.add(button_openf)
+        button_openf.connect("clicked", self.on_open_file)
         
         # separator
         separator = Gtk.Separator()
@@ -183,7 +338,7 @@ class EvinceViewer:
         self.bt_zoomp.set_tooltip_text("Zoom+")
         button_box.add(self.bt_zoomp)
         self.bt_zoomp.connect("clicked", self.fbt_zoomp)
-        # label per lo zoom
+        # label - zoom
         self.zoom_label = Gtk.Label()
         
         button_box.add(self.zoom_label)
@@ -327,29 +482,26 @@ class EvinceViewer:
         quit_button.connect("clicked", self.on_quit)
         #
         # scrolled window for the viewer
-        scroll = Gtk.ScrolledWindow()
-        self.main_box.pack_start(scroll, True, True, 0)
-        if (len(sys.argv) != 2):
-            self.info_dialog("Usage:\npdfreader.py FILE")
-            sys.exit()
-        if ftype == None:
-            self.info_dialog(os.path.basename(sys.argv[1])+":\nError while opening the file\nor type not supported.")
+        self.scroll = Gtk.ScrolledWindow()
+        self.main_box.pack_start(self.scroll, True, True, 0)
+        if self.ftype == None:
+            self.info_dialog(os.path.basename(self._file)+":\nError while opening the file\nor type not supported.")
             sys.exit()
         # EVINCE DOCUMENT
-        EvinceDocument.init()
-        self._has_password = 0
-        # load the document or exit
-        try:
-            self.doc = EvinceDocument.Document.factory_get_document('file://'+docfile)
-        except Exception as E:
-            # is encripted
-            if E.code == 2:
-                self._has_password = 1
-                self.info_dialog(os.path.basename(sys.argv[1])+":\nThe file is password protected.")
-                sys.exit()
-            else:
-                self.info_dialog(os.path.basename(sys.argv[1])+":\nError while opening the file.")
-                sys.exit()
+        # EvinceDocument.init()
+        # self._has_password = 0
+        # # load the document or exit
+        # try:
+            # self.doc = EvinceDocument.Document.factory_get_document('file://'+self._file)
+        # except Exception as E:
+            # # is encripted
+            # if E.code == 2:
+                # self._has_password = 1
+                # self.info_dialog(os.path.basename(self._file)+":\nThe file is password protected.")
+                # # sys.exit()
+            # else:
+                # self.info_dialog(os.path.basename(self._file)+":\nError while opening the file.")
+                # # sys.exit()
         #
         self.total_label.set_label(str(self.doc.get_n_pages()))
         # TOC of doc by links
@@ -360,11 +512,14 @@ class EvinceViewer:
                             EvinceView.JobPriority.PRIORITY_NONE)
                 self.job_links.connect('finished', self.index_load)
             else:
-                hist_button.set_sensitive(False)
+                bookmark_button.set_sensitive(False)
         except:
             pass
         # evince view
         self.view = EvinceView.View()
+        self.fullscreen = False
+        self.view.connect("key-press-event", self.keypress)
+        # self.view.connect('show', self.view_show_event)
         #
         self.view.can_zoom_in()
         self.view.can_zoom_out()
@@ -376,9 +531,7 @@ class EvinceViewer:
         self.page = EvinceDocument.Page.new(0)
 
         # add to scroll window
-        scroll.add(self.view)
-        self.window.show_all()
-        self.fullscreen=False
+        self.scroll.add(self.view)
         
         # print the page - needed to show the print dialog
         # workaround for the cbr file types and maybe others
@@ -388,7 +541,6 @@ class EvinceViewer:
         except:
             pass
         #
-        self.window.connect("check-resize", self.on_win_resize)
         self.view.connect("selection-changed", self.view_sel_changed)
         self.model.connect("page-changed", self.model_page_changed)
         self.curr_entry.connect("activate", self.curr_entry_activate)
@@ -402,48 +554,70 @@ class EvinceViewer:
         info_list.append(gdi.n_pages or "")
         info_list.append(gdi.producer or "")
         info_button.connect("clicked", self.finfo_button, info_list)
-        # window size constants
-        self.win_width = self.window.get_size().width
-        self.win_height = self.window.get_size().height
-        # treemodel
-        self.hstore = Gtk.TreeStore(str, int)
-        self.tree = Gtk.TreeView.new_with_model(self.hstore)
-        self.tree.set_show_expanders(True)
-        self.tree.set_activate_on_single_click(True)
-        self.tree.connect("row-activated", self.on_single_click)
-        renderer1 = Gtk.CellRendererText()
-        column1 = Gtk.TreeViewColumn("Title", renderer1, text=0)
-        self.tree.append_column(column1)
-        renderer2 = Gtk.CellRendererText()
-        column2 = Gtk.TreeViewColumn("Page", renderer2, text=1)
-        self.tree.append_column(column2)
-        self.sw = Gtk.ScrolledWindow()
-        # the width of the scrollbar
-        self.sw.set_size_request(250, -1)
-        self.sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.sw.add(self.tree)
-        self.hbox.pack_start(self.sw, False, False, 1)
-        self.tree.set_expander_column(column1)
+        #
+        if self.doc.has_document_links():
+            # treemodel
+            self.hstore = Gtk.TreeStore(str, int)
+            self.tree = Gtk.TreeView.new_with_model(self.hstore)
+            self.tree.set_show_expanders(True)
+            self.tree.set_activate_on_single_click(True)
+            self.tree.connect("row-activated", self.on_single_click)
+            renderer1 = Gtk.CellRendererText()
+            column1 = Gtk.TreeViewColumn("Title", renderer1, text=0)
+            self.tree.append_column(column1)
+            renderer2 = Gtk.CellRendererText()
+            column2 = Gtk.TreeViewColumn("Page", renderer2, text=1)
+            self.tree.append_column(column2)
+            self.sw = Gtk.ScrolledWindow()
+            # the width of the scrollbar
+            self.sw.set_size_request(250, -1)
+            self.sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            self.sw.add(self.tree)
+            self.hbox.pack_start(self.sw, False, False, 1)
+            self.tree.set_expander_column(column1)
         #
         self.list_annotations = []
         #
-        if ftype == "application/pdf":
-            hist_button.set_sensitive(True)
-            # if self.doc.can_add_annotation():
-                # annot_button.show()
-            # self._doc_can_remove_annotations = self.doc.can_remove_annotation()
+        if self.ftype == "application/pdf":
+            pass
+            # bookmark_button.set_sensitive(True)
+            # # if self.doc.can_add_annotation():
+                # # annot_button.show()
+            # # self._doc_can_remove_annotations = self.doc.can_remove_annotation()
         else:
             annot_button.hide()
-            
-    def show_event(self, event):
-        pass
+        #
+        zoom = self.model.get_scale()
+        self.zoom_label.set_text(format(zoom, '.2f'))
+    
+    # def view_show_event(self, event):
+        # self.model.set_sizing_mode(EvinceView.SizingMode.FREE)
+        # zoom = self.model.get_scale()
+        # self.zoom_label.set_text(format(zoom, '.2f'))
         
-    def on_quit(self, btn):
+    def on_quit(self, _w):
         if self._is_modified and self.model.get_document().get_modified():
             self.info_dialog("This document has been modified.\nSave it or quit this program again.")
             self._is_modified = False
+            # if self.window._notebook.get_n_pages() == 1:
+                # self.window._doc_modified = False
             return
-        Gtk.main_quit()
+        else:
+            if self.window._notebook.get_n_pages() > 1:
+                curr_page = self.window._notebook.get_current_page()
+                self.window._notebook.remove_page(curr_page)
+                self.window._list_doc_modified.remove(self._file)
+            else:
+                # self.window.on_quit(self.window.window)
+                self.window.on_quit_from_doc()
+    
+    def pagesignal(self,_signal,_param):
+        _list = _signal.propList[0]
+        if _list[0] == "adjust-zoom":
+            # self.model.props.sizing_mode = EvinceView.SizingMode.FIT_WIDTH
+            self.model.set_sizing_mode(EvinceView.SizingMode.FREE)
+            zoom = self.model.get_scale()
+            self.zoom_label.set_text(format(zoom, '.2f'))
     
     def on_menuitem_activated(self, menuitem, _type):
         if _type == "h":
@@ -455,6 +629,11 @@ class EvinceViewer:
                     self.info_dialog("Error while adding the annotation.")
                 else:
                     self._is_modified = True
+                    self.window._doc_modified = True
+                    if not self._file in self.window._list_doc_modified:
+                        self.window._list_doc_modified.append(self._file)
+                    _tab_label = self.window._notebook.get_tab_label(self.window._notebook.get_nth_page(self.window._notebook.get_current_page()))
+                    _tab_label.set_markup("<i>{}</i>".format(_tab_label.get_label()))
                     # self.save_button.set_sensitive(True)
                     # self.list_annotations.append(_annotation)
         elif _type == "i":
@@ -464,34 +643,24 @@ class EvinceViewer:
                 self.info_dialog("Error while adding the annotation.")
             else:
                 self._is_modified = True
+                self.window._doc_modified = True
+                if not self._file in self.window._list_doc_modified:
+                    self.window._list_doc_modified.append(self._file)
+                _tab_label = self.window._notebook.get_tab_label(self.window._notebook.get_nth_page(self.window._notebook.get_current_page()))
+                _tab_label.set_markup("<i>{}</i>".format(_tab_label.get_label())) #, "<span foreground=\"#ff0044\">")
                 # self.save_button.set_sensitive(True)
                 # self.list_annotations.append(_annotation)
-    
-    def on_add_annotation(self, btn):
-        if self.view.get_has_selection():
-            # EvinceDocument.AnnotationType.TEXT TEXT_MARKUP ATTACHMENT
-            _annotation = EvinceDocument.AnnotationType.TEXT
-            ret = self.view.begin_add_annotation(_annotation)
-            if ret == False:
-                self.info_dialog("Error while adding the annotation.")
-            else:
-                self._is_modified = True
-                # self.save_button.set_sensitive(True)
-                self.list_annotations.append(_annotation)
     
     # open file function
     def on_open_file(self, button):
         filename = self.fopen_dialog()
         if filename:
-            try:
-                subprocess.Popen([os.path.abspath(sys.argv[0]), filename], universal_newlines=True)
-            except Exception as E:
-                self.info_dialog(str(E))
-
+            self.window.on_app_open_from_dialog(filename)
+    
     # file open dialog
     def fopen_dialog(self):
-        dialog = Gtk.FileChooserDialog(title="Open File", parent=self.window, action=Gtk.FileChooserAction.OPEN, buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
-        dialog.set_current_folder(os.path.dirname(sys.argv[1]))
+        dialog = Gtk.FileChooserDialog(title="Open File", parent=self.window.window, action=Gtk.FileChooserAction.OPEN, buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        dialog.set_current_folder(os.path.dirname(self._file))
         response = dialog.run()
         if response == Gtk.ResponseType.OK:
             filename = dialog.get_filename()
@@ -517,9 +686,9 @@ class EvinceViewer:
         value = self.hstore.get_value(treeiter, 1)
         self.model.set_page(int(value)-1)
 
-    # history button
-    def on_hist_button(self, button):
-        hstore = self.hstore
+    # bookmark button
+    def on_bookmark_button(self, button):
+        # hstore = self.hstore
         if not self.tree.get_visible():
             self.tree.show()
             self.sw.show()
@@ -534,19 +703,11 @@ class EvinceViewer:
 
     # copy the selection to clipboard
     def on_clip_button(self, button):
-        if self.view.get_has_selection():
+        if self.view.get_has_selection() and self.window.copy_text_to_clipboard != "":
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(self.copy_text_to_clipboard, -1)
+            clipboard.set_text(self.window.copy_text_to_clipboard, -1)
+        self.window.copy_text_to_clipboard = ""
     
-    def on_win_resize(self, win):
-        rwin_width = self.window.get_size().width
-        rwin_height = self.window.get_size().height
-        if (rwin_width) != (self.win_width) or (rwin_height) != (self.win_height):
-            self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
-            conf_file = os.path.dirname(os.path.abspath(sys.argv[0]))+"/conf.cfg"
-            with open(conf_file, "w") as fconf:
-                fconf.write(str(rwin_width)+"\n"+str(rwin_height))
-
     # set the view to dualpage
     def on_dual_page(self, button):
         if not self.dpage_state:
@@ -558,13 +719,14 @@ class EvinceViewer:
             self.model.set_dual_page(False)
             self.dpage_state = False
             self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
-
-    # mouse scrolling for zoom
-    def fscroll_event(self, widget, event):
-        if event.direction == Gdk.ScrollDirection.UP:
-            self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
-        elif event.direction == Gdk.ScrollDirection.DOWN:
-            self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
+    
+    # # useless
+    # # mouse scrolling for zoom
+    # def fscroll_event(self, widget, event):
+        # if event.direction == Gdk.ScrollDirection.UP:
+            # self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
+        # elif event.direction == Gdk.ScrollDirection.DOWN:
+            # self.zoom_label.set_text(format(self.model.get_scale(), '.2f'))
 
     # left mouse click to cancel the highlighted selected words
     def view_sel_changed(self, view):
@@ -613,8 +775,8 @@ class EvinceViewer:
 
     # file save dialog
     def fsave_dialog(self):
-        dialog = Gtk.FileChooserDialog("Save File", self.window, Gtk.FileChooserAction.SAVE, (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK))
-        dialog.set_current_folder(os.path.dirname(sys.argv[1]))
+        dialog = Gtk.FileChooserDialog("Save File", self.window.window, Gtk.FileChooserAction.SAVE, (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK))
+        dialog.set_current_folder(os.path.dirname(self._file))
         dialog.set_do_overwrite_confirmation(True)
         self.add_filters(dialog)
         response = dialog.run()
@@ -632,17 +794,17 @@ class EvinceViewer:
             return False
 
     def add_filters(self, dialog):
-        if ftype == "application/pdf":
+        if self.ftype == "application/pdf":
             filter_pdf = Gtk.FileFilter()
             filter_pdf.set_name("Pdf files")
             filter_pdf.add_mime_type("application/pdf")
             dialog.add_filter(filter_pdf)
-        elif ftype == "application/postscript":
+        elif self.ftype == "application/postscript":
             filter_ps = Gtk.FileFilter()
             filter_ps.set_name("Ps files")
             filter_ps.add_mime_type("application/postscript")
             dialog.add_filter(filter_ps)
-        elif ftype == "image/tiff":
+        elif self.ftype == "image/tiff":
             filter_tiff = Gtk.FileFilter()
             filter_tiff.set_name("Tiff files")
             filter_tiff.add_mime_type("image/tiff")
@@ -731,7 +893,7 @@ class EvinceViewer:
     
     # get the info of the document
     def finfo_button(self, button, info_list):
-        if ftype == "application/pdf":
+        if self.ftype == "application/pdf":
             ddate = ""
             try:
                 ddate = datetime.datetime.fromtimestamp(int(info_list[1])).strftime(' %m-%d-%Y %H:%M:%S ')
@@ -741,18 +903,7 @@ class EvinceViewer:
     
     # document info dialog
     def info_dialog(self, stext):
-        
-        dialog = Gtk.MessageDialog(self.window, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                          Gtk.MessageType.INFO, Gtk.ButtonsType.OK, stext)
-    
-        response = dialog.run()
-
-        dialog.set_default_size(400, 300)
-        
-        if response == Gtk.ResponseType.OK:
-            dialog.destroy()
-        else:
-            dialog.destroy()
+        self.window.info_dialog(stext)
         
     def night_mode(self, btn):
         self.model.set_inverted_colors(not self.model.get_inverted_colors())
@@ -779,16 +930,16 @@ class EvinceViewer:
         keyname = Gdk.keyval_name(event.keyval)
         # # reload the document
         # if keyname=='r':
-            # self.model.get_document().load('file://'+docfile) # <- ADD THIS LINE
+            # self.model.get_document().load('file://'+self._file) # <- ADD THIS LINE
             # self.view.reload()
         # el
-        if keyname == 'Return':
-            if self.fullscreen == False:
-                self.fullscreen=True
-                self.window.fullscreen()
-            else:
-                self.fullscreen=False
-                self.window.unfullscreen()
+        # if keyname == 'Return':
+            # if self.fullscreen == False:
+                # self.fullscreen=True
+                # self.window.window.fullscreen()
+            # else:
+                # self.fullscreen=False
+                # self.window.window.unfullscreen()
         # # quit the program
         # elif keyname=='q':
             # Gtk.main_quit()
@@ -796,8 +947,44 @@ class EvinceViewer:
         # elif keyname=='a':
             # self.view.select_all()
         # escape
-        elif keyname == 'escape':
+        # el
+        if keyname == 'escape':
             self.view.cancel_add_annotation()
+
+class SignalObject(GObject.Object):
+    
+    def __init__(self):
+        GObject.Object.__init__(self)
+        self._name = ""
+        self.value = -99
+        self._list = []
+    
+    @GObject.Property(type=str)
+    def propName(self):
+        'Read-write integer property.'
+        return self._name
+
+    @propName.setter
+    def propName(self, name):
+        self._name = name
+    
+    @GObject.Property(type=int)
+    def propInt(self):
+        'Read-write integer property.'
+        return self.value
+
+    @propInt.setter
+    def propInt(self, value):
+        self.value = value
+    
+    @GObject.Property(type=object)
+    def propList(self):
+        'Read-write integer property.'
+        return self._list
+
+    @propList.setter
+    def propList(self, data):
+        self._list = [data]
 
 ### CLIPBOARD ###
 
@@ -824,6 +1011,6 @@ Clipboard()
 
 if __name__ == "__main__":
     evinceViewer = EvinceViewer()
-    zoom = evinceViewer.model.get_scale()
-    evinceViewer.zoom_label.set_text(format(zoom, '.2f'))
+    # zoom = evinceViewer.model.get_scale()
+    # evinceViewer.zoom_label.set_text(format(zoom, '.2f'))
     Gtk.main()
