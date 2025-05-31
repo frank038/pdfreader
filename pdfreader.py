@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V. 3.0
+# V. 3.1
 
 # use headbar
 USE_HEADBAR = 1
@@ -14,7 +14,7 @@ import gi
 gi.require_version('EvinceDocument', '3.0')
 gi.require_version('Gtk', '3.0')
 gi.require_version('EvinceView', '3.0')
-from gi.repository import Gtk, Gdk, GLib, Gio, GObject
+from gi.repository import Gtk, Gdk, GLib, Gio, Pango #, GObject
 from gi.repository import EvinceDocument
 from gi.repository import EvinceView
 import os,sys, datetime, subprocess
@@ -134,7 +134,7 @@ class EvinceViewer:
         self.copy_text_to_clipboard = ""
         #
         # self.sig = None
-        self.sig = SignalObject()
+        # self.sig = SignalObject()
         #
         self.window.show_all()
         #
@@ -161,6 +161,8 @@ class EvinceViewer:
             pagewin = pageWin(self, _file, self.doc)
             #
             page_label = Gtk.Label(label=os.path.basename(_file))
+            page_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            page_label.set_hexpand(True)
             page_label.set_tooltip_text(_file)
             self._notebook.append_page(pagewin, page_label)
             #
@@ -216,7 +218,7 @@ class EvinceViewer:
         rwin_width = self.window.get_size().width
         rwin_height = self.window.get_size().height
         if (rwin_width) != (self.win_width) or (rwin_height) != (self.win_height):
-            self.sig.propList = ["adjust-zoom"]
+            # self.sig.propList = ["adjust-zoom"]
             conf_file = os.path.dirname(os.path.abspath(sys.argv[0]))+"/conf.cfg"
             with open(conf_file, "w") as fconf:
                 fconf.write(str(rwin_width)+"\n"+str(rwin_height))
@@ -240,8 +242,8 @@ class pageWin(Gtk.Box):
         self._file = _file
         self.doc = _doc
         #
-        self._signal = self.window.sig
-        self._signal.connect("notify::propList", self.pagesignal)
+        # self._signal = self.window.sig
+        # self._signal.connect("notify::propList", self.pagesignal)
         #
         file = Gio.File.new_for_path(self._file)
         self.ftype = None
@@ -340,8 +342,15 @@ class pageWin(Gtk.Box):
         self.bt_zoomp.connect("clicked", self.fbt_zoomp)
         # label - zoom
         self.zoom_label = Gtk.Label()
-        
-        button_box.add(self.zoom_label)
+        # deactivated
+        # button_box.add(self.zoom_label)
+        # zoom restore
+        pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-fit-best", TICON_SIZE, 0)
+        zoom_restore_image = Gtk.Image.new_from_pixbuf(pixbuf)
+        self.zoom_restore = Gtk.Button(image=zoom_restore_image)
+        self.zoom_restore.set_tooltip_text("Fit width")
+        self.zoom_restore.connect('clicked', self.on_zoom_restore)
+        button_box.add(self.zoom_restore)
         # zoom -
         pixbuf = Gtk.IconTheme.get_default().load_icon("zoom-out", TICON_SIZE, 0)
         zoomm_image = Gtk.Image.new_from_pixbuf(pixbuf)
@@ -618,6 +627,9 @@ class pageWin(Gtk.Box):
             self.model.set_sizing_mode(EvinceView.SizingMode.FREE)
             zoom = self.model.get_scale()
             self.zoom_label.set_text(format(zoom, '.2f'))
+    
+    def on_zoom_restore(self, btn):
+        self.model.props.sizing_mode = EvinceView.SizingMode.FIT_WIDTH
     
     def on_menuitem_activated(self, menuitem, _type):
         if _type == "h":
@@ -927,6 +939,11 @@ class pageWin(Gtk.Box):
         
     # handling keyboard events
     def keypress(self,widget,event):
+        # keyval = event.keyval
+        # keyval_name = Gdk.keyval_name(keyval)
+        # shift = bool(event.state & Gdk.ModifierType.SHIFT_MASK)
+        # if shift and keyval_name == "Return":
+            
         keyname = Gdk.keyval_name(event.keyval)
         # # reload the document
         # if keyname=='r':
@@ -951,40 +968,40 @@ class pageWin(Gtk.Box):
         if keyname == 'escape':
             self.view.cancel_add_annotation()
 
-class SignalObject(GObject.Object):
+# class SignalObject(GObject.Object):
     
-    def __init__(self):
-        GObject.Object.__init__(self)
-        self._name = ""
-        self.value = -99
-        self._list = []
+    # def __init__(self):
+        # GObject.Object.__init__(self)
+        # self._name = ""
+        # self.value = -99
+        # self._list = []
     
-    @GObject.Property(type=str)
-    def propName(self):
-        'Read-write integer property.'
-        return self._name
+    # @GObject.Property(type=str)
+    # def propName(self):
+        # 'Read-write integer property.'
+        # return self._name
 
-    @propName.setter
-    def propName(self, name):
-        self._name = name
+    # @propName.setter
+    # def propName(self, name):
+        # self._name = name
     
-    @GObject.Property(type=int)
-    def propInt(self):
-        'Read-write integer property.'
-        return self.value
+    # @GObject.Property(type=int)
+    # def propInt(self):
+        # 'Read-write integer property.'
+        # return self.value
 
-    @propInt.setter
-    def propInt(self, value):
-        self.value = value
+    # @propInt.setter
+    # def propInt(self, value):
+        # self.value = value
     
-    @GObject.Property(type=object)
-    def propList(self):
-        'Read-write integer property.'
-        return self._list
+    # @GObject.Property(type=object)
+    # def propList(self):
+        # 'Read-write integer property.'
+        # return self._list
 
-    @propList.setter
-    def propList(self, data):
-        self._list = [data]
+    # @propList.setter
+    # def propList(self, data):
+        # self._list = [data]
 
 ### CLIPBOARD ###
 
