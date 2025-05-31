@@ -21,6 +21,7 @@ Features:
 - save the window size
 - load documents
 - single instance mode
+- tabs
 
 
 ![My image](https://github.com/frank038/pdfreader/blob/master/image.png)
