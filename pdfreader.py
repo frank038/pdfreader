@@ -934,7 +934,7 @@ class pageWin(Gtk.Box):
     def button_clicked(self, button):
         global settings
         if not settings:
-            self.evprint.run(self.window)
+            self.evprint.run(self.window.window)
             settings = self.evprint.get_print_settings()
         else:
             self.evprint = EvinceView.PrintOperation.new(self.doc)
