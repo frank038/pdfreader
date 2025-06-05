@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V. 3.1
+# V. 3.2
 
 # use headbar
 USE_HEADBAR = 1
@@ -564,26 +564,29 @@ class pageWin(Gtk.Box):
         info_list.append(gdi.producer or "")
         info_button.connect("clicked", self.finfo_button, info_list)
         #
-        if self.doc.has_document_links():
-            # treemodel
-            self.hstore = Gtk.TreeStore(str, int)
-            self.tree = Gtk.TreeView.new_with_model(self.hstore)
-            self.tree.set_show_expanders(True)
-            self.tree.set_activate_on_single_click(True)
-            self.tree.connect("row-activated", self.on_single_click)
-            renderer1 = Gtk.CellRendererText()
-            column1 = Gtk.TreeViewColumn("Title", renderer1, text=0)
-            self.tree.append_column(column1)
-            renderer2 = Gtk.CellRendererText()
-            column2 = Gtk.TreeViewColumn("Page", renderer2, text=1)
-            self.tree.append_column(column2)
-            self.sw = Gtk.ScrolledWindow()
-            # the width of the scrollbar
-            self.sw.set_size_request(250, -1)
-            self.sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-            self.sw.add(self.tree)
-            self.hbox.pack_start(self.sw, False, False, 1)
-            self.tree.set_expander_column(column1)
+        try:
+            if self.doc.has_document_links():
+                # treemodel
+                self.hstore = Gtk.TreeStore(str, int)
+                self.tree = Gtk.TreeView.new_with_model(self.hstore)
+                self.tree.set_show_expanders(True)
+                self.tree.set_activate_on_single_click(True)
+                self.tree.connect("row-activated", self.on_single_click)
+                renderer1 = Gtk.CellRendererText()
+                column1 = Gtk.TreeViewColumn("Title", renderer1, text=0)
+                self.tree.append_column(column1)
+                renderer2 = Gtk.CellRendererText()
+                column2 = Gtk.TreeViewColumn("Page", renderer2, text=1)
+                self.tree.append_column(column2)
+                self.sw = Gtk.ScrolledWindow()
+                # the width of the scrollbar
+                self.sw.set_size_request(250, -1)
+                self.sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+                self.sw.add(self.tree)
+                self.hbox.pack_start(self.sw, False, False, 1)
+                self.tree.set_expander_column(column1)
+        except:
+            pass
         #
         self.list_annotations = []
         #
