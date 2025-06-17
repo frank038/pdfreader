@@ -6,7 +6,7 @@ Simple pdf files (and others) reader using the Evince libs.
 
 Required: python, gtk3, evince python bindibgs.
 
-This program opens all the file types and has all the feature supported by the evince libs bindings (e.g.: forms).
+This program opens all the file types and has all the feature supported by the evince libs bindings (e.g.: forms, cbz comic books).
 Features:
 - table of content (if supported by the file type)
 - printing (if supported by the file type)
