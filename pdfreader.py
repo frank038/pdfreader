@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# V. 3.2
+# V. 3.2.1
 
 # use headbar
 USE_HEADBAR = 1
@@ -438,7 +438,8 @@ class pageWin(Gtk.Box):
         info_button.set_tooltip_text("Document info")
         button_box.add(info_button)
         # annotations
-        pixbuf = Gtk.IconTheme.get_default().load_icon("annotations-text-symbolic", TICON_SIZE, 0)
+        # pixbuf = Gtk.IconTheme.get_default().load_icon("annotations-text-symbolic", TICON_SIZE, 0)
+        pixbuf = Gtk.IconTheme.get_default().load_icon("appointment-new", TICON_SIZE, 0)
         annot_image = Gtk.Image.new_from_pixbuf(pixbuf)
         # annot_button = Gtk.Button(image=annot_image)
         annot_button = Gtk.MenuButton(image=annot_image)
